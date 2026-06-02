@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "author": "Pulso Urbano — Brisola · GS 2026/1",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-v1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -80,
+      "left": 220,
+      "attrs": { "pin": "4" }
+    },
+    {
+      "type": "wokwi-gas-sensor",
+      "id": "mq135",
+      "top": 80,
+      "left": 220,
+      "attrs": { "ppm": "500" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledVerde",
+      "top": -120,
+      "left": -140,
+      "attrs": { "color": "green" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rVerde",
+      "top": -100,
+      "left": -100,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledAmarelo",
+      "top": -60,
+      "left": -140,
+      "attrs": { "color": "yellow" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rAmarelo",
+      "top": -40,
+      "left": -100,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledVermelho",
+      "top": 0,
+      "left": -140,
+      "attrs": { "color": "red" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rVermelho",
+      "top": 20,
+      "left": -100,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer1",
+      "top": 120,
+      "left": -140,
+      "attrs": { "volume": "0.5" }
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd1",
+      "top": -200,
+      "left": -140,
+      "attrs": {
+        "pins": "i2c",
+        "address": "0x27"
+      }
+    }
+  ],
+  "connections": [
+    ["esp:GND.1",      "dht1:GND",      "black",  []],
+    ["esp:3V3",        "dht1:VCC",      "red",    []],
+    ["esp:GPIO4",      "dht1:SDA",      "green",  []],
+
+    ["esp:GND.2",      "mq135:GND",     "black",  []],
+    ["esp:5V",         "mq135:VCC",     "red",    []],
+    ["esp:GPIO34",     "mq135:AOUT",    "orange", []],
+
+    ["esp:GPIO27",     "rVerde:1",      "green",  []],
+    ["rVerde:2",       "ledVerde:A",    "green",  []],
+    ["ledVerde:K",     "esp:GND.3",     "black",  []],
+
+    ["esp:GPIO26",     "rAmarelo:1",    "yellow", []],
+    ["rAmarelo:2",     "ledAmarelo:A",  "yellow", []],
+    ["ledAmarelo:K",   "esp:GND.4",     "black",  []],
+
+    ["esp:GPIO25",     "rVermelho:1",   "red",    []],
+    ["rVermelho:2",    "ledVermelho:A", "red",    []],
+    ["ledVermelho:K",  "esp:GND.5",     "black",  []],
+
+    ["esp:GPIO32",     "buzzer1:1",     "purple", []],
+    ["esp:GND.6",      "buzzer1:2",     "black",  []],
+
+    ["esp:GND.7",      "lcd1:GND",      "black",  []],
+    ["esp:5V",         "lcd1:VCC",      "red",    []],
+    ["esp:GPIO21",     "lcd1:SDA",      "blue",   []],
+    ["esp:GPIO22",     "lcd1:SCL",      "cyan",   []]
+  ]
+}
