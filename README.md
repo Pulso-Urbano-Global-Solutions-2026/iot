@@ -1,6 +1,32 @@
-# 🛰️ Pulso Urbano — Módulo IoT
+# Pulso Urbano — Módulo IoT
 
-> **"O Sentinel-5P mede NO₂ em São Paulo com 3.5km de resolução — não enxerga uma rua. Nosso ESP32 resolve isso: mede a qualidade do ar localmente, no ponto exato, a cada 10 segundos. Os dois dados se encontram no backend Java, que combina satélite e sensor local para calcular um score mais preciso. Quando o ar fica crítico, o ESP32 acende o LED vermelho, dispara o buzzer e publica um alerta MQTT — em segundos, o Oracle registra e o app exibe para o usuário."**
+**Global Solution 2026/1 · FIAP · ADS 2º ano**  
+Disciplina: **Disruptive Architectures: IoT, IoB & Generative AI**
+
+> "O Sentinel-5P mede NO₂ em São Paulo com 3,5 km de resolução — não enxerga uma rua. Nosso ESP32 resolve isso: mede a qualidade do ar localmente, no ponto exato, a cada 10 segundos. Os dois dados se encontram no backend Java, que combina satélite e sensor local para calcular um score mais preciso. Quando o ar fica crítico, o ESP32 acende o LED vermelho, dispara o buzzer e publica um alerta MQTT — em segundos, o Oracle registra e o app exibe para o usuário."
+
+---
+
+## Equipe
+
+| Integrante | RM | Papel |
+|------------|-----|-------|
+| **Felipe Ferrete** | 562999 | Tech Lead · integração MQTT no backend Java (`MqttSubscriberService.java`) |
+| **Clayton Alves** | 562285 | Database · tabela `leitura_iot` no Oracle |
+| **Guilherme Sola** | 563674 | Mobile · Frontend React Native |
+| **Gustavo Bosak** | 566315 | QA · Arquitetura TOGAF |
+| **Nikolas Brisola** | 564371 | IoT · ESP32 — **dono desta entrega** |
+
+---
+
+## Links
+
+| Recurso | URL |
+|---------|-----|
+| Projeto Wokwi | _[preencher após publicação]_ |
+| Vídeo do protótipo (3 min) | _[YouTube — preencher após gravação]_ |
+| Dashboard Node-RED | `http://localhost:1880/ui` (local, após configuração) |
+| Java API (integração MQTT) | `https://hearty-adaptation-production-6de3.up.railway.app/swagger-ui.html` |
 
 ---
 
@@ -178,4 +204,4 @@ WebServer             (built-in ESP32 core)
 
 ---
 
-*Pulso Urbano IoT Module · Owner: Brisola · GS 2026/1 · FIAP 2TDS*
+*Pulso Urbano IoT Module · Owner: Nikolas Brisola (RM 564371) · GS 2026/1 · FIAP 2TDS*
