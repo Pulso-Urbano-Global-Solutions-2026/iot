@@ -1,0 +1,519 @@
+[
+    {
+        "id": "9048f72f83d7a7ed",
+        "type": "mqtt in",
+        "z": "d33ef54fe0bc7439",
+        "name": "MQTT In: telemetria",
+        "topic": "pulso/sp/zona-centro/telemetria",
+        "qos": "0",
+        "broker": "hivemq_broker",
+        "inputs": 0,
+        "x": 190,
+        "y": 260,
+        "wires": [
+            [
+                "fb0aa4f1d730e8d9"
+            ]
+        ]
+    },
+    {
+        "id": "53f02d253c2ea678",
+        "type": "mqtt in",
+        "z": "d33ef54fe0bc7439",
+        "name": "MQTT In: alerta",
+        "topic": "pulso/sp/zona-centro/alerta",
+        "qos": "0",
+        "broker": "hivemq_broker",
+        "inputs": 0,
+        "x": 200,
+        "y": 420,
+        "wires": [
+            [
+                "4e59508feafb1ad5"
+            ]
+        ]
+    },
+    {
+        "id": "fb0aa4f1d730e8d9",
+        "type": "function",
+        "z": "d33ef54fe0bc7439",
+        "name": "Parse + Enriquecimento Dashboard 2.0",
+        "func": "let dados;\ntry {\n    dados = JSON.parse(msg.payload);\n} catch (e) {\n    node.error(\"Payload inválido: \" + msg.payload);\n    return null;\n}\n\ndados.origem = \"sensor_local\";\ndados.processadoEm = new Date().toISOString();\n\n// No Dashboard 2.0, os gauges e charts aceitam o valor numérico direto no msg.payload\nlet msgTemp = { payload: dados.temperatura, topic: \"Temperatura\" };\nlet msgAr = { payload: dados.mq135Raw, topic: \"Gás RAW\" };\n\n// Formatação de texto dinâmica para o ui-text do Dashboard 2.0\nlet corClasse = {\n    \"BOM\"      : \"#27ae60\",\n    \"MODERADO\" : \"#f39c12\",\n    \"RUIM\"     : \"#e67e22\",\n    \"CRITICO\"  : \"#e74c3c\"\n};\nlet cor = corClasse[dados.classificacao] || \"#7f8c8d\";\n\n// Customização usando HTML simples que o ui-text v2 renderiza lindamente\nlet msgScore = {\n    payload: `<span style='color:${cor}; font-weight:bold; font-size:1.2em;'>${dados.scoreLocal.toFixed(1)} — ${dados.classificacao}</span>`\n};\n\n// Para o ui-chart do Dashboard 2.0, basta enviar o número. Ele cria o histórico sozinho por tempo!\nlet msgChart = { payload: dados.scoreLocal, topic: \"Score Ambiental\" };\n\n// Payload para Java API\nlet msgJava = {\n    payload: JSON.stringify({\n        zonaId       : dados.zonaId,\n        deviceId     : \"ESP32-PULSO-01\",\n        temperatura  : dados.temperatura,\n        umidade      : dados.umidade,\n        mq135Raw     : dados.mq135Raw,\n        nivelAr      : dados.nivelAr,\n        scoreLocal   : dados.scoreLocal,\n        classificacao: dados.classificacao,\n        dtLeitura    : dados.processadoEm\n    }),\n    headers: {\n        \"Content-Type\": \"application/json\"\n    },\n    method: \"POST\",\n    url   : \"http://localhost:8080/api/v1/iot/leitura\"\n};\n\nreturn [msgTemp, msgAr, msgScore, msgChart, msgJava];",
+        "outputs": 5,
+        "x": 480,
+        "y": 260,
+        "wires": [
+            [
+                "2f5bbbb218504b5e"
+            ],
+            [
+                "b67ec10dab7cd773"
+            ],
+            [
+                "d9689b103c2460ad"
+            ],
+            [
+                "65522f7916c895db"
+            ],
+            [
+                "4d3d11b45ab720d0"
+            ]
+        ]
+    },
+    {
+        "id": "4e59508feafb1ad5",
+        "type": "function",
+        "z": "d33ef54fe0bc7439",
+        "name": "Alerta Crítico v2",
+        "func": "let alerta;\ntry {\n    alerta = JSON.parse(msg.payload);\n} catch (e) {\n    node.error(\"Alerta inválido: \" + msg.payload);\n    return null;\n}\n\n// ui-notification no Dashboard 2.0 aceita strings direto ou objetos de configuração\nlet msgNotificacao = {\n    payload : \"⚠️ ALERTA CRÍTICO — Zona \" + alerta.zonaId + \" | Score: \" + alerta.scoreLocal.toFixed(1) + \" | Temp: \" + alerta.temperatura + \"°C\"\n};\n\nlet msgLog = {\n    payload: {\n        tipo        : \"ALERTA_CRITICO\",\n        zonaId      : alerta.zonaId,\n        scoreLocal  : alerta.scoreLocal,\n        temperatura : alerta.temperatura,\n        mq135Raw    : alerta.mq135Raw,\n        ts          : new Date().toISOString()\n    },\n    topic: \"log_alerta\"\n};\n\nreturn [msgNotificacao, msgLog];",
+        "outputs": 2,
+        "x": 400,
+        "y": 420,
+        "wires": [
+            [
+                "bb1ddf31d2180922"
+            ],
+            [
+                "063fecde5b4814c8"
+            ]
+        ]
+    },
+    {
+        "id": "4d3d11b45ab720d0",
+        "type": "http request",
+        "z": "d33ef54fe0bc7439",
+        "d": true,
+        "name": "POST Java API /iot/leitura",
+        "method": "use",
+        "paytoqs": "ignore",
+        "url": "http://localhost:8080/api/v1/iot/leitura",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 870,
+        "y": 400,
+        "wires": [
+            [
+                "063fecde5b4814c8"
+            ]
+        ]
+    },
+    {
+        "id": "063fecde5b4814c8",
+        "type": "debug",
+        "z": "d33ef54fe0bc7439",
+        "name": "Debug Log",
+        "active": true,
+        "x": 1070,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "13ac656244d1aa16",
+        "type": "inject",
+        "z": "d33ef54fe0bc7439",
+        "name": "Teste temperatura",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "25",
+        "payloadType": "num",
+        "x": 850,
+        "y": 80,
+        "wires": [
+            [
+                "2f5bbbb218504b5e"
+            ]
+        ]
+    },
+    {
+        "id": "2f5bbbb218504b5e",
+        "type": "ui-gauge",
+        "z": "d33ef54fe0bc7439",
+        "name": "Temperatura v3",
+        "group": "4db7a48e04f67329",
+        "order": 3,
+        "value": "payload",
+        "valueType": "msg",
+        "width": 3,
+        "height": 3,
+        "gtype": "gauge-half",
+        "gstyle": "needle",
+        "title": "Temperatura",
+        "alwaysShowTitle": false,
+        "floatingTitlePosition": "top-left",
+        "units": "Graus °C",
+        "icon": "",
+        "prefix": "",
+        "suffix": "",
+        "segments": [
+            {
+                "from": "0",
+                "color": "#5cd65c",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "40",
+                "color": "#ffc800",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "60",
+                "color": "#ea5353",
+                "text": "",
+                "textType": "label"
+            }
+        ],
+        "min": 0,
+        "max": "60",
+        "sizeThickness": 16,
+        "sizeGap": 4,
+        "sizeKeyThickness": 8,
+        "styleRounded": true,
+        "styleGlow": false,
+        "className": "",
+        "x": 840,
+        "y": 160,
+        "wires": [
+            [
+                "837749c6de645546"
+            ]
+        ]
+    },
+    {
+        "id": "b67ec10dab7cd773",
+        "type": "ui-gauge",
+        "z": "d33ef54fe0bc7439",
+        "name": "Qualidade do Ar v3",
+        "group": "4db7a48e04f67329",
+        "order": 2,
+        "value": "payload",
+        "valueType": "msg",
+        "width": 3,
+        "height": 3,
+        "gtype": "gauge-half",
+        "gstyle": "needle",
+        "title": "Qualidade do Ar",
+        "alwaysShowTitle": false,
+        "floatingTitlePosition": "top-left",
+        "units": "Poluição",
+        "icon": "",
+        "prefix": "",
+        "suffix": "",
+        "segments": [
+            {
+                "from": "0",
+                "color": "#5cd65c",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "1200",
+                "color": "#ffc800",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "2500",
+                "color": "#ea5353",
+                "text": "",
+                "textType": "label"
+            }
+        ],
+        "min": 0,
+        "max": "4095",
+        "sizeThickness": 16,
+        "sizeGap": 4,
+        "sizeKeyThickness": 8,
+        "styleRounded": true,
+        "styleGlow": false,
+        "className": "",
+        "x": 850,
+        "y": 220,
+        "wires": [
+            [
+                "80c4b0e70d4b9d61"
+            ]
+        ]
+    },
+    {
+        "id": "d9689b103c2460ad",
+        "type": "ui-text",
+        "z": "d33ef54fe0bc7439",
+        "group": "4db7a48e04f67329",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "name": "Score Ambiental v3",
+        "label": "Score Ambiental",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "value": "payload",
+        "valueType": "msg",
+        "x": 850,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "bb1ddf31d2180922",
+        "type": "ui-notification",
+        "z": "d33ef54fe0bc7439",
+        "ui": "0ac6d8b0e74f3e8b",
+        "position": "top right",
+        "colorDefault": true,
+        "color": "#000000",
+        "displayTime": "5000",
+        "showCountdown": true,
+        "outputs": 1,
+        "allowDismiss": true,
+        "dismissText": "Close",
+        "allowConfirm": false,
+        "confirmText": "Confirm",
+        "raw": false,
+        "className": "",
+        "name": "Popup Alerta v3",
+        "x": 840,
+        "y": 460,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "65522f7916c895db",
+        "type": "ui-chart",
+        "z": "d33ef54fe0bc7439",
+        "group": "4db7a48e04f67329",
+        "name": "Historico v3",
+        "label": "Evolução do Score Ambiental",
+        "order": 9007199254740991,
+        "chartType": "line",
+        "category": "payload",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "auto",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "0",
+        "ymax": "100",
+        "bins": 10,
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": 4,
+        "showLegend": true,
+        "removeOlder": "20",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "1000",
+        "colors": [
+            "#0095ff",
+            "#ff0000",
+            "#ff7f0e",
+            "#2ca02c",
+            "#a347e1",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": 6,
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 830,
+        "y": 340,
+        "wires": [
+            [
+                "9c5c3b98d551fd60"
+            ]
+        ]
+    },
+    {
+        "id": "837749c6de645546",
+        "type": "debug",
+        "z": "d33ef54fe0bc7439",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1140,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "80c4b0e70d4b9d61",
+        "type": "debug",
+        "z": "d33ef54fe0bc7439",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1140,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "9c5c3b98d551fd60",
+        "type": "debug",
+        "z": "d33ef54fe0bc7439",
+        "name": "debug 3",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1160,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "hivemq_broker",
+        "type": "mqtt-broker",
+        "name": "HiveMQ Cloud",
+        "broker": "broker.hivemq.com",
+        "port": "1883",
+        "clientid": "nodered-pulso-01",
+        "keepalive": "60",
+        "cleansession": true
+    },
+    {
+        "id": "4db7a48e04f67329",
+        "type": "ui-group",
+        "name": "Indicadores Locais",
+        "page": "ae5fed91287d4b8e",
+        "width": 6,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "0ac6d8b0e74f3e8b",
+        "type": "ui-base",
+        "name": "Pulso Urbano",
+        "path": "/dashboard",
+        "appIcon": "",
+        "includeClientData": true,
+        "acceptsClientConfig": [
+            "ui-notification",
+            "ui-control"
+        ],
+        "showPathInSidebar": false,
+        "headerContent": "page",
+        "navigationStyle": "default",
+        "titleBarStyle": "default",
+        "showReconnectNotification": true,
+        "notificationDisplayTime": 1,
+        "showDisconnectNotification": true,
+        "allowInstall": false
+    },
+    {
+        "id": "ae5fed91287d4b8e",
+        "type": "ui-page",
+        "name": "Pulso Urbano - IoT",
+        "ui": "0ac6d8b0e74f3e8b",
+        "path": "/page2",
+        "icon": "home",
+        "layout": "grid",
+        "theme": "d880413ab194468b",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 1,
+        "className": "",
+        "visible": "true",
+        "disabled": "false"
+    },
+    {
+        "id": "d880413ab194468b",
+        "type": "ui-theme",
+        "name": "Default Theme",
+        "colors": {
+            "surface": "#ffffff",
+            "primary": "#0094CE",
+            "bgPage": "#eeeeee",
+            "groupBg": "#ffffff",
+            "groupOutline": "#cccccc"
+        },
+        "sizes": {
+            "density": "default",
+            "pagePadding": "12px",
+            "groupGap": "12px",
+            "groupBorderRadius": "4px",
+            "widgetGap": "12px"
+        }
+    },
+    {
+        "id": "8050ca4e5e834728",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@flowfuse/node-red-dashboard": "1.30.2"
+        }
+    }
+]

@@ -1,53 +1,48 @@
 // =============================================================
-// PULSO URBANO — Firmware ESP32
+// PULSO URBANO — Firmware ESP32 (Versão Monitorada para QA)
 // Disciplina: Disruptive Architectures: IoT, IoB & Generative AI
 // Owner: Brisola · GS 2026/1 · FIAP 2TDS
-//
-// O satélite Sentinel-5P mede NO₂ com resolução de 3.5km.
-// Este ESP32 preenche a lacuna: mede ar e temperatura no ponto
-// exato, publica via MQTT, e o backend Java cruza os dois dados.
 // =============================================================
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <DHTesp.h>
+#include <DHT.h>             
+#include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
 
 // ----------------------------------------------------------
-// CONFIGURAÇÕES — edite aqui antes de flashar
+// CONFIGURAÇÕES
 // ----------------------------------------------------------
-#define WIFI_SSID     "SUA_REDE_WIFI"
-#define WIFI_PASSWORD "SUA_SENHA_WIFI"
+#define WIFI_SSID     "Wokwi-GUEST"
+#define WIFI_PASSWORD ""
 
-#define MQTT_BROKER   "broker.hivemq.com"
-#define MQTT_PORT     1883
+#define MQTT_BROKER    "broker.hivemq.com"
+#define MQTT_PORT      1883
 #define MQTT_CLIENT_ID "ESP32-PULSO-01"
 
-// Identificação da zona monitorada
-#define ZONA_ID    1
-#define ZONA_NOME  "Centro SP"
+#define ZONA_ID   1
+#define ZONA_NOME "Centro SP"
 
-// Intervalos de tempo (milissegundos)
-#define INTERVALO_LEITURA 10000UL   // 10s — leitura + publicação telemetria
-#define INTERVALO_STATUS  60000UL   // 60s — publicação status do dispositivo
+#define INTERVALO_LEITURA 10000UL
+#define INTERVALO_STATUS  60000UL
 
 // ----------------------------------------------------------
 // PINAGEM
 // ----------------------------------------------------------
-#define PIN_DHT22    4
-#define PIN_MQ135   34   // ADC — entrada analógica (0–4095)
+#define PIN_DHT22        4
+#define DHTTYPE      DHT22   
+#define PIN_MQ135       34
 
-#define PIN_LED_VERDE   27
-#define PIN_LED_AMARELO 26
+#define PIN_LED_VERDE    27
+#define PIN_LED_AMARELO  26
 #define PIN_LED_VERMELHO 25
-#define PIN_BUZZER      32
+#define PIN_BUZZER       32
 
-// LCD 16x2 I2C — endereço padrão 0x27, SDA=21, SCL=22
 #define LCD_ADDR 0x27
 #define LCD_COLS 16
-#define LCD_ROWS 2
+#define LCD_ROWS  2
 
 // ----------------------------------------------------------
 // TÓPICOS MQTT
@@ -59,215 +54,228 @@
 // ----------------------------------------------------------
 // OBJETOS GLOBAIS
 // ----------------------------------------------------------
-WiFiClient       wifiClient;
-PubSubClient     mqttClient(wifiClient);
-WebServer        server(80);
-DHTesp           dht;
+WiFiClient        wifiClient;
+PubSubClient      mqttClient(wifiClient);
+WebServer         server(80);
+DHT               dht(PIN_DHT22, DHTTYPE); 
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 // ----------------------------------------------------------
-// ESTADO GLOBAL — snapshot da última leitura
+// ESTADO GLOBAL
 // ----------------------------------------------------------
 struct LeituraAtual {
-  float temperatura  = 0.0;
-  float umidade      = 0.0;
-  int   mq135Raw     = 0;
-  float scoreLocal   = 0.0;
+  float  temperatura   = 0.0;
+  float  umidade       = 0.0;
+  int    mq135Raw      = 0;
+  float  scoreLocal    = 0.0;
   String classificacao = "AGUARDANDO";
-  bool  dht22Ok      = false;
-  bool  mq135Ok      = false;
+  bool   dht22Ok       = false;
+  bool   mq135Ok       = false;
 } leitura;
 
-// Controle de tempo sem delay()
 unsigned long ultimaLeitura = 0;
 unsigned long ultimoStatus  = 0;
-unsigned long inicioMs      = 0;   // para calcular uptime
+unsigned long inicioMs      = 0;
+
+// ----------------------------------------------------------
+// Buzzer não-bloqueante
+// ----------------------------------------------------------
+struct Buzzer {
+  bool          ativo        = false;
+  int           pulsosTotal  = 3;
+  int           pulsoAtual   = 0;
+  bool          emHigh       = false;
+  unsigned long ultimoT      = 0;
+  const unsigned long DURACAO = 200UL; 
+} buzzerState;
+
+void conectarWifi();
+void reconectarMQTT();
+void executarCicloLeitura();
+void lerSensores();
+float calcularScore(float temp, int mq135Raw);
+String classificar(float score);
+void atualizarLED(String classificacao);
+void acionarBuzzerSeNecessario(String classificacao);
+void tickBuzzer();
+void atualizarLCD(float score, String classificacao);
+void publicarTelemetria();
+void publicarAlerta();
+void publicarStatus();
+void configurarEndpoints();
 
 // =============================================================
 // SETUP
 // =============================================================
 void setup() {
   Serial.begin(115200);
-  inicioMs = millis();
+  while (!Serial) { delay(10); }
+  delay(2000);                   
+  
+  Serial.println("\n=============================================");
+  Serial.println("   PULSO URBANO - INICIALIZANDO FIRMWARE     ");
+  Serial.println("=============================================");
 
-  // Pinos de saída
+  Serial.println("[SETUP] Inicializando barramento I2C...");
+  Wire.begin(21, 22); 
+
+  Serial.println("[SETUP] Configurando pinos de atuacao (LEDs e Buzzer)...");
   pinMode(PIN_LED_VERDE,    OUTPUT);
   pinMode(PIN_LED_AMARELO,  OUTPUT);
   pinMode(PIN_LED_VERMELHO, OUTPUT);
   pinMode(PIN_BUZZER,       OUTPUT);
 
-  // LCD
+  Serial.println("[SETUP] Inicializando Display LCD I2C...");
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print("Pulso Urbano");
-  lcd.setCursor(0, 1);
-  lcd.print("Iniciando...");
+  lcd.setCursor(0, 0); lcd.print("Pulso Urbano");
+  lcd.setCursor(0, 1); lcd.print("Iniciando...");
 
-  // DHT22
-  dht.setup(PIN_DHT22, DHTesp::DHT22);
+  Serial.println("[SETUP] Inicializando Sensor DHT22...");
+  dht.begin(); 
 
-  // Wi-Fi
   conectarWifi();
 
-  // MQTT
+  Serial.println("[SETUP] Configurando cliente MQTT HiveMQ...");
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setBufferSize(512);
 
-  // REST API
+  Serial.println("[SETUP] Configurando rotas da API REST Local...");
   configurarEndpoints();
   server.begin();
 
+  Serial.println("[SETUP] Aguardando estabilizacao dos sensores...");
+  delay(2000); // Dá 2 segundos para o DHT22 e MQ135 iniciarem com energia estável
+  
+  lerSensores(); 
+  leitura.scoreLocal = calcularScore(leitura.temperatura, leitura.mq135Raw);
+  leitura.classificacao = classificar(leitura.scoreLocal);
+
   lcd.clear();
   lcd.print("Sistema OK");
+  Serial.println("[SETUP] Inicializacao concluida com SUCESSO!\n");
+  
+  inicioMs      = millis();
+  ultimaLeitura = millis(); // ← linha nova
+  ultimoStatus  = millis(); // ← linha nova
+  
 }
 
+
 // =============================================================
-// LOOP — sem delay(); tudo via millis()
+// LOOP
 // =============================================================
 void loop() {
-  // Mantém conexões ativas
   if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[LOOP WARN] Conexao Wi-Fi perdida! Tentando recuperar...");
     conectarWifi();
   }
+  
   if (!mqttClient.connected()) {
     reconectarMQTT();
   }
+  
   mqttClient.loop();
-
-  // Mantém a REST API atendendo requisições
   server.handleClient();
+
+  tickBuzzer();
 
   unsigned long agora = millis();
 
-  // --- Ciclo de leitura (10s) ---
   if (agora - ultimaLeitura >= INTERVALO_LEITURA) {
     ultimaLeitura = agora;
     executarCicloLeitura();
   }
 
-  // --- Publicação de status (60s) ---
   if (agora - ultimoStatus >= INTERVALO_STATUS) {
     ultimoStatus = agora;
     publicarStatus();
   }
 }
 
-// =============================================================
-// CONEXÃO WI-FI
-// =============================================================
 void conectarWifi() {
-  Serial.print("Conectando ao Wi-Fi: ");
-  Serial.println(WIFI_SSID);
+  Serial.printf("[WIFI] Tentando conectar a rede: %s\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  // Tentativas limitadas para não bloquear indefinidamente
   int tentativas = 0;
   while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
-    delay(500);   // delay() só aqui, fora do loop() principal
+    delay(500);
     Serial.print(".");
     tentativas++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("\nWi-Fi conectado. IP: ");
-    Serial.println(WiFi.localIP());
+    Serial.printf("\n[WIFI OK] Conectado com sucesso! Endereco IP Local: %s\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("\nFalha no Wi-Fi — continuando sem rede.");
+    Serial.println("\n[WIFI ERROR] Falha ao conectar no Wi-Fi. Operando em modo offline.");
   }
 }
 
-// =============================================================
-// RECONEXÃO MQTT com backoff de 5s
-// =============================================================
 void reconectarMQTT() {
-  if (mqttClient.connected()) return;
-
-  Serial.print("Reconectando MQTT ao HiveMQ Cloud...");
-  // Tenta uma vez; se falhar, aguarda 5s e retorna ao loop()
-  // O backoff real acontece porque loop() só chama esta função
-  // quando connected() == false, e o millis() já avançou 5s
-  // antes da próxima chamada efetiva.
+  static unsigned long ultimaTentativaMqtt = 0;
+  if (millis() - ultimaTentativaMqtt < 5000) return; // Nao bloqueia o loop, tenta a cada 5s
+  
+  ultimaTentativaMqtt = millis();
+  Serial.printf("[MQTT] Tentando conectar ao Broker: %s:%d\n", MQTT_BROKER, MQTT_PORT);
+  
   if (mqttClient.connect(MQTT_CLIENT_ID)) {
-    Serial.println(" conectado.");
+    Serial.printf("[MQTT OK] Conectado com o ID: %s\n", MQTT_CLIENT_ID);
   } else {
-    Serial.print(" falhou (rc=");
-    Serial.print(mqttClient.state());
-    Serial.println("). Próxima tentativa em 5s.");
-    delay(5000);   // backoff — único delay() permitido fora do ciclo de leitura
+    Serial.printf("[MQTT ERROR] Falhou. Codigo de erro rc=%d (Tentara novamente em 5s)\n", mqttClient.state());
   }
 }
 
-// =============================================================
-// CICLO COMPLETO DE LEITURA — acionado a cada 10s
-// =============================================================
 void executarCicloLeitura() {
+  Serial.println("\n--- [NOVO CICLO DE LEITURA] ---");
   lerSensores();
 
   leitura.scoreLocal    = calcularScore(leitura.temperatura, leitura.mq135Raw);
   leitura.classificacao = classificar(leitura.scoreLocal);
 
+  Serial.printf("[PROCESSADOR] Score Calculado: %.1f | Classificacao: %s\n", leitura.scoreLocal, leitura.classificacao.c_str());
+
   atualizarLED(leitura.classificacao);
-  atualizarBuzzer(leitura.classificacao);
+  acionarBuzzerSeNecessario(leitura.classificacao); 
   atualizarLCD(leitura.scoreLocal, leitura.classificacao);
+  
   publicarTelemetria();
 
-  // Alerta MQTT apenas quando condição crítica — dado local complementa
-  // o dado orbital: se o satélite não enxerga a rua, o ESP32 enxerga.
   if (leitura.classificacao == "CRITICO") {
     publicarAlerta();
   }
-
-  Serial.printf("[Leitura] Temp=%.1f°C  Umid=%.1f%%  MQ135=%d  Score=%.1f  Class=%s\n",
-    leitura.temperatura, leitura.umidade, leitura.mq135Raw,
-    leitura.scoreLocal, leitura.classificacao.c_str());
 }
 
-// =============================================================
-// LEITURA DE SENSORES
-// =============================================================
 void lerSensores() {
-  // DHT22
-  TempAndHumidity dados = dht.getTempAndHumidity();
-  leitura.dht22Ok = (dht.getStatus() == DHTesp::ERROR_NONE);
+  Serial.println("[SENSORES] Solicitando dados ao DHT22...");
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+
+  leitura.dht22Ok = (!isnan(t) && !isnan(h));
 
   if (leitura.dht22Ok) {
-    leitura.temperatura = dados.temperature;
-    leitura.umidade     = dados.humidity;
+    leitura.temperatura = t;
+    leitura.umidade     = h;
+    Serial.printf("[SENSORES OK] DHT22 -> Temp: %.1f C | Umidade: %.1f%%\n", t, h);
   } else {
-    // Mantém último valor válido — não invalida o score por falha pontual
-    Serial.println("[WARN] DHT22: leitura inválida.");
+    Serial.println("[SENSORES ERROR] Falha de leitura no DHT22! Mantendo ultimos valores.");
   }
 
-  // MQ135 — leitura analógica raw 0-4095 (ADC 12 bits do ESP32)
+  Serial.println("[SENSORES] Lendo canal analgico do MQ135...");
   leitura.mq135Raw = analogRead(PIN_MQ135);
   leitura.mq135Ok  = (leitura.mq135Raw >= 0 && leitura.mq135Raw <= 4095);
+  Serial.printf("[SENSORES OK] MQ135 -> Leitura Crua (Raw): %d\n", leitura.mq135Raw);
 }
 
-// =============================================================
-// ALGORITMO DE SCORE LOCAL
-// Mesmo pesos do backend Java — consistência narrativa para
-// que o dado local e o orbital sejam comparáveis.
-//
-// score_temp = max(0, 1 - max(0, (temp - 30) / 20)) * 40
-// score_ar   = max(0, 1 - (mq135Raw / 4095.0))      * 60
-// scoreLocal = score_temp + score_ar  → [0, 100]
-// =============================================================
 float calcularScore(float temp, int mq135Raw) {
-  // Componente temperatura: penaliza acima de 30°C até zerar em 50°C
-  float fatorTemp = max(0.0f, 1.0f - max(0.0f, (temp - 30.0f) / 20.0f));
-  float scoreTemp = fatorTemp * 40.0f;
+  float fFactor = max(0.0f, 1.0f - max(0.0f, (temp - 30.0f) / 20.0f));
+  float scoreTemp = fFactor * 40.0f;
 
-  // Componente qualidade do ar: MQ135 alto = ar ruim = score baixo
-  float fatorAr  = max(0.0f, 1.0f - ((float)mq135Raw / 4095.0f));
-  float scoreAr  = fatorAr * 60.0f;
+  float fAir = max(0.0f, 1.0f - ((float)mq135Raw / 4095.0f));
+  float scoreAr = fAir * 60.0f;
 
   return scoreTemp + scoreAr;
 }
 
-// =============================================================
-// CLASSIFICAÇÃO DO SCORE
-// =============================================================
 String classificar(float score) {
   if (score >= 80.0) return "BOM";
   if (score >= 60.0) return "MODERADO";
@@ -275,60 +283,84 @@ String classificar(float score) {
   return "CRITICO";
 }
 
-// =============================================================
-// SAÍDAS — LED, BUZZER, LCD
-// =============================================================
 void atualizarLED(String classificacao) {
-  // Desliga todos antes de acender o correto
   digitalWrite(PIN_LED_VERDE,    LOW);
   digitalWrite(PIN_LED_AMARELO,  LOW);
   digitalWrite(PIN_LED_VERMELHO, LOW);
 
   if (classificacao == "BOM") {
     digitalWrite(PIN_LED_VERDE, HIGH);
+    Serial.println("[ATUADORES] LED Verde ACESO.");
   } else if (classificacao == "MODERADO") {
     digitalWrite(PIN_LED_AMARELO, HIGH);
+    Serial.println("[ATUADORES] LED Amarelo ACESO.");
   } else {
-    // RUIM e CRITICO — LED vermelho
     digitalWrite(PIN_LED_VERMELHO, HIGH);
+    Serial.println("[ATUADORES] LED Vermelho ACESO.");
   }
 }
 
-void atualizarBuzzer(String classificacao) {
+void acionarBuzzerSeNecessario(String classificacao) {
   if (classificacao != "CRITICO") {
+    if (buzzerState.ativo) {
+      Serial.println("[ATUADORES] Desativando alarme sonoro do Buzzer.");
+    }
+    buzzerState.ativo = false;
     digitalWrite(PIN_BUZZER, LOW);
     return;
   }
 
-  // 3 pulsos de 200ms — alerta sonoro local quando condição crítica
-  for (int i = 0; i < 3; i++) {
+  if (!buzzerState.ativo) {
+    Serial.println("[⚠️ ALERTA ATUADOR] Estado CRITICO detectado! Armando sequencia do Buzzer.");
+    buzzerState.ativo       = true;
+    buzzerState.pulsoAtual  = 0;
+    buzzerState.emHigh      = true;
+    buzzerState.ultimoT     = millis();
     digitalWrite(PIN_BUZZER, HIGH);
-    delay(200);
+  }
+}
+
+void tickBuzzer() {
+  if (!buzzerState.ativo) return;
+
+  unsigned long agora = millis();
+  if (agora - buzzerState.ultimoT < buzzerState.DURACAO) return;
+
+  buzzerState.ultimoT = agora;
+
+  if (buzzerState.emHigh) {
     digitalWrite(PIN_BUZZER, LOW);
-    delay(200);
+    buzzerState.emHigh = false;
+  } else {
+    buzzerState.pulsoAtual++;
+    if (buzzerState.pulsoAtual >= buzzerState.pulsosTotal) {
+      buzzerState.ativo = false;
+      Serial.println("[ATUADORES] Sequencia de bips do buzzer concluida.");
+    } else {
+      digitalWrite(PIN_BUZZER, HIGH);
+      buzzerState.emHigh = true;
+    }
   }
 }
 
 void atualizarLCD(float score, String classificacao) {
+  Serial.println("[LCD] Atualizando informacoes no display...");
   lcd.clear();
-
-  // Linha 1: score formatado
   lcd.setCursor(0, 0);
   lcd.print("Score: ");
   lcd.print(score, 1);
 
-  // Linha 2: classificação (truncada em 16 chars)
   lcd.setCursor(0, 1);
   String linha2 = classificacao;
   if (linha2.length() > 16) linha2 = linha2.substring(0, 16);
   lcd.print(linha2);
 }
 
-// =============================================================
-// PUBLICAÇÃO MQTT — TELEMETRIA (a cada 10s)
-// =============================================================
 void publicarTelemetria() {
-  if (!mqttClient.connected()) return;
+  if (!mqttClient.connected()) {
+    Serial.println("[MQTT SEND WARN] Falha no envio: Cliente desconectado do Broker.");
+    return;
+  }
 
   StaticJsonDocument<256> doc;
   doc["zonaId"]        = ZONA_ID;
@@ -343,15 +375,15 @@ void publicarTelemetria() {
 
   char buffer[256];
   serializeJson(doc, buffer);
-  mqttClient.publish(TOPICO_TELEMETRIA, buffer);
+  
+  Serial.printf("[MQTT SEND] Publicando Telemetria no topico [%s]...\n", TOPICO_TELEMETRIA);
+  if (mqttClient.publish(TOPICO_TELEMETRIA, buffer)) {
+    Serial.println("[MQTT SEND OK] JSON enviado com sucesso!");
+  } else {
+    Serial.println("[MQTT SEND ERROR] Falha interna ao tentar publicar telemetria.");
+  }
 }
 
-// =============================================================
-// PUBLICAÇÃO MQTT — ALERTA (apenas quando CRÍTICO)
-// Dados orbitais têm 3.5km de resolução — o ESP32 é o único
-// que enxerga esse quarteirão. Quando crítico, o backend Java
-// precisa saber imediatamente para atualizar o score do app.
-// =============================================================
 void publicarAlerta() {
   if (!mqttClient.connected()) return;
 
@@ -366,14 +398,11 @@ void publicarAlerta() {
 
   char buffer[256];
   serializeJson(doc, buffer);
+  
+  Serial.printf("[MQTT SEND ALERTA] ⚠️ Enviando payload de emergencia para [%s]...\n", TOPICO_ALERTA);
   mqttClient.publish(TOPICO_ALERTA, buffer);
-
-  Serial.println("[ALERTA] Publicado topico alerta CRITICO.");
 }
 
-// =============================================================
-// PUBLICAÇÃO MQTT — STATUS DO DISPOSITIVO (a cada 60s)
-// =============================================================
 void publicarStatus() {
   if (!mqttClient.connected()) return;
 
@@ -387,17 +416,14 @@ void publicarStatus() {
 
   char buffer[256];
   serializeJson(doc, buffer);
+  
+  Serial.println("[MQTT SEND STATUS] Enviando batimento de coracao (Uptime Heartbeat)...");
   mqttClient.publish(TOPICO_STATUS, buffer);
 }
 
-// =============================================================
-// REST API — ENDPOINTS
-// Expostos na rede local para inspeção direta sem depender do MQTT.
-// =============================================================
 void configurarEndpoints() {
-
-  // GET /leitura — snapshot da última leitura dos sensores
   server.on("/leitura", HTTP_GET, []() {
+    Serial.println("[API REST] Requisicao GET recebida em /leitura");
     StaticJsonDocument<256> doc;
     doc["zonaId"]        = ZONA_ID;
     doc["temperatura"]   = leitura.temperatura;
@@ -412,25 +438,25 @@ void configurarEndpoints() {
     server.send(200, "application/json", resposta);
   });
 
-  // GET /status — saúde do dispositivo (uptime, Wi-Fi, heap)
   server.on("/status", HTTP_GET, []() {
+    Serial.println("[API REST] Requisicao GET recebida em /status");
     StaticJsonDocument<256> doc;
-    doc["deviceId"]     = MQTT_CLIENT_ID;
-    doc["uptime"]       = (unsigned long)((millis() - inicioMs) / 1000);
-    doc["mqttConectado"]= mqttClient.connected();
-    doc["wifiSSID"]     = WIFI_SSID;
-    doc["wifiRSSI"]     = WiFi.RSSI();
-    doc["freeHeap"]     = ESP.getFreeHeap();
+    doc["deviceId"]      = MQTT_CLIENT_ID;
+    doc["uptime"]        = (unsigned long)((millis() - inicioMs) / 1000);
+    doc["mqttConectado"] = mqttClient.connected();
+    doc["wifiSSID"]      = WIFI_SSID;
+    doc["wifiRSSI"]      = WiFi.RSSI();
+    doc["freeHeap"]      = ESP.getFreeHeap();
 
     String resposta;
     serializeJson(doc, resposta);
     server.send(200, "application/json", resposta);
   });
 
-  // GET /health — verificação rápida dos subsistemas
   server.on("/health", HTTP_GET, []() {
+    Serial.println("[API REST] Requisicao GET recebida em /health");
     StaticJsonDocument<128> doc;
-    doc["status"]      = "ok";
+    doc["status"]       = "ok";
     doc["sensor_dht22"] = leitura.dht22Ok ? "ok" : "erro";
     doc["sensor_mq135"] = leitura.mq135Ok ? "ok" : "erro";
     doc["mqtt"]         = mqttClient.connected() ? "conectado" : "desconectado";
@@ -440,8 +466,8 @@ void configurarEndpoints() {
     server.send(200, "application/json", resposta);
   });
 
-  // Rota padrão para URLs não mapeadas
   server.onNotFound([]() {
+    Serial.println("[API REST WARN] Tentativa de acesso a rota inexistente!");
     server.send(404, "application/json", "{\"erro\":\"rota nao encontrada\"}");
   });
 }
