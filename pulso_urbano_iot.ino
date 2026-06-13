@@ -1,5 +1,5 @@
 // =============================================================
-// PULSO URBANO — Firmware ESP32 (Versão Monitorada para QA)
+// PULSO URBANO — Firmware ESP32 
 // Disciplina: Disruptive Architectures: IoT, IoB & Generative AI
 // Owner: Brisola · GS 2026/1 · FIAP 2TDS
 // =============================================================
@@ -43,6 +43,19 @@
 #define LCD_ADDR 0x27
 #define LCD_COLS 16
 #define LCD_ROWS  2
+
+// ----------------------------------------------------------
+// CALIBRACAO MQ135
+// O MQ135 precisa ter o R0 (raw em "ar limpo") calibrado no momento
+// da instalacao -- pratica padrao para sensores desse tipo, pois o
+// baseline varia com ventilacao, gases residuais do ambiente e, no
+// simulador, com a propria seed de cada execucao. Por isso o baseline
+// e medido automaticamente no boot (ver calibrarMQ135() no setup),
+// em vez de um valor fixo.
+#define MQ135_AMOSTRAS_CALIBRACAO 5     // leituras usadas para calibrar no boot
+#define MQ135_RANGE               1500.0f  // delta acima do baseline até score = 0
+
+float mq135Baseline = 3000.0f; // valor padrao; sobrescrito por calibrarMQ135()
 
 // ----------------------------------------------------------
 // TÓPICOS MQTT
@@ -93,6 +106,8 @@ void conectarWifi();
 void reconectarMQTT();
 void executarCicloLeitura();
 void lerSensores();
+void calibrarMQ135();
+void verificarComandoSerial();
 float calcularScore(float temp, int mq135Raw);
 String classificar(float score);
 void atualizarLED(String classificacao);
@@ -146,7 +161,9 @@ void setup() {
 
   Serial.println("[SETUP] Aguardando estabilizacao dos sensores...");
   delay(2000); // Dá 2 segundos para o DHT22 e MQ135 iniciarem com energia estável
-  
+
+  calibrarMQ135();
+
   lerSensores(); 
   leitura.scoreLocal = calcularScore(leitura.temperatura, leitura.mq135Raw);
   leitura.classificacao = classificar(leitura.scoreLocal);
@@ -156,8 +173,8 @@ void setup() {
   Serial.println("[SETUP] Inicializacao concluida com SUCESSO!\n");
   
   inicioMs      = millis();
-  ultimaLeitura = millis(); // ← linha nova
-  ultimoStatus  = millis(); // ← linha nova
+  ultimaLeitura = millis(); 
+  ultimoStatus  = millis(); 
   
 }
 
@@ -179,6 +196,7 @@ void loop() {
   server.handleClient();
 
   tickBuzzer();
+  verificarComandoSerial();
 
   unsigned long agora = millis();
 
@@ -235,7 +253,7 @@ void executarCicloLeitura() {
   Serial.printf("[PROCESSADOR] Score Calculado: %.1f | Classificacao: %s\n", leitura.scoreLocal, leitura.classificacao.c_str());
 
   atualizarLED(leitura.classificacao);
-  acionarBuzzerSeNecessario(leitura.classificacao); 
+  acionarBuzzerSeNecessario(leitura.classificacao);
   atualizarLCD(leitura.scoreLocal, leitura.classificacao);
   
   publicarTelemetria();
@@ -245,19 +263,36 @@ void executarCicloLeitura() {
   }
 }
 
+// ----------------------------------------------------------
+// FAIXA PLAUSIVEL DE TEMPERATURA (contexto: clima de Sao Paulo)
+// Valores fora desta faixa sao tratados como falha de sensor
+// (cabo solto, ruido eletrico, sensor danificado), e NAO como
+// "frio extremo real" -- o score nao deve reagir a -40C, pois
+// isso nunca ocorre na pratica e indica dado invalido, nao um
+// cenario ambiental valido para o algoritmo.
+#define TEMP_MIN_PLAUSIVEL -10.0f
+#define TEMP_MAX_PLAUSIVEL  55.0f
+
 void lerSensores() {
   Serial.println("[SENSORES] Solicitando dados ao DHT22...");
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  leitura.dht22Ok = (!isnan(t) && !isnan(h));
+  bool leituraNumerica = (!isnan(t) && !isnan(h));
+  bool leituraPlausivel = (t >= TEMP_MIN_PLAUSIVEL && t <= TEMP_MAX_PLAUSIVEL);
+
+  leitura.dht22Ok = leituraNumerica && leituraPlausivel;
 
   if (leitura.dht22Ok) {
     leitura.temperatura = t;
     leitura.umidade     = h;
     Serial.printf("[SENSORES OK] DHT22 -> Temp: %.1f C | Umidade: %.1f%%\n", t, h);
+  } else if (!leituraNumerica) {
+    Serial.println("[SENSORES ERROR] Falha de leitura no DHT22 (NaN)! Mantendo ultimos valores.");
   } else {
-    Serial.println("[SENSORES ERROR] Falha de leitura no DHT22! Mantendo ultimos valores.");
+    // Numerico, porem fora da faixa plausivel -- provavel falha de sensor/cabo.
+    Serial.printf("[SENSORES ERROR] Temperatura implausivel (%.1f C) -- fora de [%.1f, %.1f]. Mantendo ultimos valores.\n",
+      t, TEMP_MIN_PLAUSIVEL, TEMP_MAX_PLAUSIVEL);
   }
 
   Serial.println("[SENSORES] Lendo canal analgico do MQ135...");
@@ -266,12 +301,50 @@ void lerSensores() {
   Serial.printf("[SENSORES OK] MQ135 -> Leitura Crua (Raw): %d\n", leitura.mq135Raw);
 }
 
-float calcularScore(float temp, int mq135Raw) {
-  float fFactor = max(0.0f, 1.0f - max(0.0f, (temp - 30.0f) / 20.0f));
-  float scoreTemp = fFactor * 40.0f;
+// =============================================================================
+// CALIBRACAO MQ135 — executada uma vez no setup()
+// Calcula a media de N leituras do ADC para usar como baseline ("ar
+// limpo") deste ciclo de operacao. Substitui a abordagem de baseline
+// fixo, que se mostrou instavel entre execucoes do simulador.
+// =============================================================================
+void calibrarMQ135() {
+  Serial.println("[CALIBRACAO] Calibrando baseline do MQ135...");
+  long soma = 0;
+  for (int i = 0; i < MQ135_AMOSTRAS_CALIBRACAO; i++) {
+    int lectura_i = analogRead(PIN_MQ135);
+    soma += lectura_i;
+    Serial.printf("[CALIBRACAO]   amostra %d/%d = %d\n", i + 1, MQ135_AMOSTRAS_CALIBRACAO, lectura_i);
+    delay(200);
+  }
+  mq135Baseline = (float)soma / MQ135_AMOSTRAS_CALIBRACAO;
+  Serial.printf("[CALIBRACAO OK] Baseline definido: %.1f (raw)\n", mq135Baseline);
+}
 
-  float fAir = max(0.0f, 1.0f - ((float)mq135Raw / 4095.0f));
-  float scoreAr = fAir * 60.0f;
+// =============================================================================
+// VERIFICAR COMANDO SERIAL — limpa e desativada
+// =============================================================================
+void verificarComandoSerial() {
+  // Função limpa.
+}
+
+float calcularScore(float temp, int mq135Raw) {
+  // REBALANCEAMENTO (peso temperatura 65% / ar 35%, ponto de corte 25C):
+  // No simulador, o MQ135 oscila pouco em torno do baseline calibrado
+  // (variacao tipica de ate +-10%), enquanto o slider de temperatura do
+  // DHT22 cobre uma faixa ampla (ex: 20C a 60C+). Com os pesos originais
+  // (60% ar / 40% temp, corte em 30C), o score minimo possivel ficava
+  // travado em ~54-60 -- RUIM/CRITICO eram matematicamente inalcancaveis.
+  // Com 65% temp / 35% ar e corte em 25C, a temperatura sozinha percorre
+  // as 4 faixas (BOM->MODERADO->RUIM->CRITICO), e o ar continua atuando
+  // como modulador real quando sua leitura varia.
+  float fFactor = max(0.0f, 1.0f - max(0.0f, (temp - 25.0f) / 25.0f));
+  float scoreTemp = fFactor * 65.0f;
+
+  // Normaliza em torno do baseline calibrado no boot (mq135Baseline).
+  // raw <= baseline  -> fatorAr = 1   (score maximo, ar dentro do esperado)
+  // raw aumenta acima do baseline -> fatorAr cai linearmente até 0
+  float fAir = max(0.0f, 1.0f - max(0.0f, ((float)mq135Raw - mq135Baseline) / MQ135_RANGE));
+  float scoreAr = fAir * 35.0f;
 
   return scoreTemp + scoreAr;
 }

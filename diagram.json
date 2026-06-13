@@ -3,70 +3,203 @@
   "author": "Pulso Urbano — Brisola · GS 2026/1",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
-    { "type": "wokwi-dht22", "id": "dht1", "top": -66.9, "left": 253.8, "attrs": { "pin": "4" } },
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp32",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -66.9,
+      "left": 253.8,
+      "attrs": {}
+    },
     {
       "type": "wokwi-gas-sensor",
       "id": "mq135",
       "top": 127.5,
       "left": -185,
-      "attrs": { "ppm": "500" }
+      "attrs": {
+        "ppm": "500"
+      }
     },
     {
       "type": "wokwi-led",
       "id": "ledVerde",
       "top": -109.2,
       "left": -111.4,
-      "attrs": { "color": "green", "resistance": "220" }
+      "attrs": {
+        "color": "green"
+      }
     },
     {
       "type": "wokwi-led",
       "id": "ledAmarelo",
       "top": -61.2,
       "left": -121,
-      "attrs": { "color": "yellow", "resistance": "220" }
+      "attrs": {
+        "color": "yellow"
+      }
     },
     {
       "type": "wokwi-led",
       "id": "ledVermelho",
       "top": -3.6,
       "left": -130.6,
-      "attrs": { "color": "red", "resistance": "220" }
+      "attrs": {
+        "color": "red"
+      }
     },
     {
       "type": "wokwi-buzzer",
       "id": "buzzer1",
       "top": -26.4,
       "left": -238.2,
-      "attrs": { "volume": "0.5" }
+      "attrs": {
+        "volume": "0.5"
+      }
     },
     {
       "type": "wokwi-lcd1602",
       "id": "lcd1",
       "top": -214.4,
       "left": -23.2,
-      "attrs": { "pins": "i2c", "address": "0x27" }
+      "attrs": {
+        "pins": "i2c",
+        "address": "0x27"
+      }
     }
   ],
   "connections": [
-    [ "esp:GND.1", "dht1:GND", "black", [] ],
-    [ "esp:3V3", "dht1:VCC", "red", [] ],
-    [ "esp:D4", "dht1:SDA", "green", [] ],
-    [ "esp:GND.2", "mq135:GND", "black", [] ],
-    [ "esp:5V", "mq135:VCC", "red", [] ],
-    [ "esp:D34", "mq135:AO", "orange", [] ],
-    [ "esp:D27", "ledVerde:A", "green", [] ],
-    [ "ledVerde:K", "esp:GND.3", "black", [] ],
-    [ "esp:D26", "ledAmarelo:A", "yellow", [] ],
-    [ "ledAmarelo:K", "esp:GND.4", "black", [] ],
-    [ "esp:D25", "ledVermelho:A", "red", [] ],
-    [ "ledVermelho:K", "esp:GND.5", "black", [] ],
-    [ "esp:D32", "buzzer1:1", "purple", [ "v-2.72", "h-187.2" ] ],
-    [ "esp:GND.6", "buzzer1:2", "black", [] ],
-    [ "esp:GND.7", "lcd1:GND", "black", [] ],
-    [ "esp:5V", "lcd1:VCC", "red", [] ],
-    [ "esp:D21", "lcd1:SDA", "blue", [] ],
-    [ "esp:D22", "lcd1:SCL", "cyan", [ "h-110.89", "v-185.42" ] ]
+    [
+      "esp32:TX",
+      "$serialMonitor:RX",
+      "",
+      []
+    ],
+    [
+      "esp32:RX",
+      "$serialMonitor:TX",
+      "",
+      []
+    ],
+    [
+      "esp32:GND.1",
+      "dht1:GND",
+      "black",
+      []
+    ],
+    [
+      "esp32:3V3",
+      "dht1:VCC",
+      "red",
+      []
+    ],
+    [
+      "esp32:4",
+      "dht1:SDA",
+      "green",
+      []
+    ],
+    [
+      "esp32:GND.2",
+      "mq135:GND",
+      "black",
+      []
+    ],
+    [
+      "esp32:5V",
+      "mq135:VCC",
+      "red",
+      []
+    ],
+    [
+      "esp32:34",
+      "mq135:AO",
+      "orange",
+      []
+    ],
+    [
+      "esp32:27",
+      "ledVerde:A",
+      "green",
+      []
+    ],
+    [
+      "ledVerde:C",
+      "esp32:GND.1",
+      "black",
+      []
+    ],
+    [
+      "esp32:26",
+      "ledAmarelo:A",
+      "yellow",
+      []
+    ],
+    [
+      "ledAmarelo:C",
+      "esp32:GND.2",
+      "black",
+      []
+    ],
+    [
+      "esp32:25",
+      "ledVermelho:A",
+      "red",
+      []
+    ],
+    [
+      "ledVermelho:C",
+      "esp32:GND.1",
+      "black",
+      []
+    ],
+    [
+      "esp32:32",
+      "buzzer1:1",
+      "purple",
+      [
+        "v-2.72",
+        "h-187.2"
+      ]
+    ],
+    [
+      "esp32:GND.2",
+      "buzzer1:2",
+      "black",
+      []
+    ],
+    [
+      "esp32:GND.1",
+      "lcd1:GND",
+      "black",
+      []
+    ],
+    [
+      "esp32:5V",
+      "lcd1:VCC",
+      "red",
+      []
+    ],
+    [
+      "esp32:21",
+      "lcd1:SDA",
+      "blue",
+      []
+    ],
+    [
+      "esp32:22",
+      "lcd1:SCL",
+      "cyan",
+      [
+        "h-110.89",
+        "v-185.42"
+      ]
+    ]
   ],
   "dependencies": {}
 }
